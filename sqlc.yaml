@@ -1,0 +1,60 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "pgstorage/queries"
+    schema: "pgstorage/migrator/schema.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "pgstorage/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        json_tags_case_style: "snake"
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        overrides:
+          - db_type: "text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.text"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "varchar"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.varchar"
+            nullable: true
+            go_type:
+              type: "string"
+              pointer: true
+          - db_type: "integer"
+            nullable: true
+            go_type:
+              type: "uint32"
+              pointer: true
+          - db_type: "pg_catalog.int4"
+            nullable: true
+            go_type:
+              type: "uint32"
+              pointer: true
+          - db_type: "timestamp"
+            go_type: "time.Time"
+          - db_type: "pg_catalog.timestamp"
+            go_type: "time.Time"
+          - db_type: "timestamp"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
+          - db_type: "pg_catalog.timestamp"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true
