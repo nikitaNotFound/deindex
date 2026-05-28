@@ -9,10 +9,10 @@ type BlockMessage struct {
 	Header *ethtypes.Header
 }
 
-func NewBlockMessage(header *ethtypes.Header) engine.Message {
-	return engine.CreateMessage(&BlockMessage{
+func NewBlockMessage(header *ethtypes.Header) *BlockMessage {
+	return &BlockMessage{
 		Header: header,
-	})
+	}
 }
 
 func (m *BlockMessage) Topic() engine.TopicID {
@@ -23,10 +23,10 @@ type RawTransactionMessage struct {
 	Transaction *ethtypes.Transaction
 }
 
-func NewRawTransactionMessage(transaction *ethtypes.Transaction) engine.Message {
-	return engine.CreateMessage(&RawTransactionMessage{
+func NewRawTransactionMessage(transaction *ethtypes.Transaction) *RawTransactionMessage {
+	return &RawTransactionMessage{
 		Transaction: transaction,
-	})
+	}
 }
 
 func (m *RawTransactionMessage) Topic() engine.TopicID {

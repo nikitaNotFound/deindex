@@ -42,7 +42,7 @@ func (b *BlocksSub) Start(engineCtx engine.EngineCtx) error {
 		case err := <-sub.Err():
 			return fmt.Errorf("subscription error on %s: %w", b.network, err)
 		case header := <-headers:
-			if err := engineCtx.PublishMsg(ctx, messages.NewBlockMessage(header)); err != nil {
+			if err := engineCtx.Publish(ctx, messages.NewBlockMessage(header)); err != nil {
 				return fmt.Errorf("handle block: %w", err)
 			}
 		}

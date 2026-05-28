@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"fmt"
+
 	"github.com/google/uuid"
 )
 
@@ -10,19 +12,30 @@ type Producer interface {
 	Start(engineCtx EngineCtx) error
 }
 
-type Receiver interface {
-	Receive(engineCtx EngineCtx, msg Message) error
+type Receiver[T TopicProvider] interface {
+	Receive(ctx EngineCtx, msg T) error
 }
 
-type ProducerReceiver interface {
-	Producer
-	Receiver
+type rawReceiver interface {
+	receive(ctx EngineCtx, msg Message) error
+}
+
+type typedReceiver[T TopicProvider] struct {
+	impl Receiver[T]
+}
+
+func (r *typedReceiver[T]) receive(ctx EngineCtx, msg Message) error {
+	payload, ok := msg.Payload().(T)
+	if !ok {
+		return fmt.Errorf("unexpected payload type %T", msg.Payload())
+	}
+	return r.impl.Receive(ctx, payload)
 }
 
 type Actor struct {
 	id       ActorID
 	producer Producer
-	receiver Receiver
+	receiver rawReceiver
 
 	listenedTopics []TopicID
 }
@@ -35,7 +48,7 @@ func (a *Actor) GetProducer() Producer {
 	return a.producer
 }
 
-func (a *Actor) GetReceiver() Receiver {
+func (a *Actor) GetReceiver() rawReceiver {
 	return a.receiver
 }
 
@@ -74,13 +87,18 @@ func WithListenedTopics(topics ...TopicID) CreateReceiverActorOpt {
 	}
 }
 
-func CreateActor(impl ProducerReceiver, opts ...CreateReceiverActorOpt) *Actor {
+type ProducerReceiver[T TopicProvider] interface {
+	Producer
+	Receiver[T]
+}
+
+func CreateProducerReceiverActor[T TopicProvider](impl ProducerReceiver[T], opts ...CreateReceiverActorOpt) *Actor {
 	params := handleCreateReceiverParams(opts...)
 
 	return &Actor{
 		id:             params.customID,
 		producer:       impl,
-		receiver:       impl,
+		receiver:       &typedReceiver[T]{impl: impl},
 		listenedTopics: params.listenedTopics,
 	}
 }
@@ -95,13 +113,13 @@ func CreateProducerActor(impl Producer, opts ...CreateActorOpt) *Actor {
 	}
 }
 
-func CreateReceiverActor(impl Receiver, opts ...CreateReceiverActorOpt) *Actor {
+func CreateReceiverActor[T TopicProvider](impl Receiver[T], opts ...CreateReceiverActorOpt) *Actor {
 	params := handleCreateReceiverParams(opts...)
 
 	return &Actor{
 		id:             params.customID,
 		producer:       nil,
-		receiver:       impl,
+		receiver:       &typedReceiver[T]{impl: impl},
 		listenedTopics: params.listenedTopics,
 	}
 }
@@ -129,5 +147,4 @@ func handleCreateReceiverParams(opts ...CreateReceiverActorOpt) *CreateReceiverA
 	}
 
 	return params
-
 }

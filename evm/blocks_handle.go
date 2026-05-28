@@ -3,7 +3,6 @@ package evm
 import (
 	"fmt"
 
-	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/nikitaNotFound/deindex/engine"
 	"github.com/nikitaNotFound/deindex/messages"
@@ -23,35 +22,15 @@ func NewBlocksHandle(network types.Network, nodesPool *nodecon.NodesPool) *Block
 	}
 }
 
-func (b *BlocksHandle) Receive(engineCtx engine.EngineCtx, msg engine.Message) error {
-	switch msg.Topic() {
-	case messages.TopicBlock:
-		blockMsg, ok := msg.Payload().(*messages.BlockMessage)
-		if !ok {
-			return fmt.Errorf("invalid block message: %T", msg.Payload())
-		}
-
-		return b.handleBlock(engineCtx, blockMsg.Header)
-	default:
-		return fmt.Errorf("unknown topic: %s", msg.Topic())
-	}
-}
-
-func (b *BlocksHandle) handleBlock(engineCtx engine.EngineCtx, header *ethtypes.Header) error {
+func (b *BlocksHandle) Receive(engineCtx engine.EngineCtx, msg *messages.BlockMessage) error {
 	ethClient := ethclient.NewClient(b.nodesPool.GetActiveRpcProvider())
-	block, err := ethClient.BlockByHash(engineCtx.Context(), header.Hash())
+	block, err := ethClient.BlockByHash(engineCtx.Context(), msg.Header.Hash())
 	if err != nil {
 		return fmt.Errorf("get block by hash: %w", err)
 	}
 
-	txs := block.Transactions()
-	txMessages := make([]engine.Message, 0, len(txs))
-	for _, tx := range txs {
-		txMessages = append(txMessages, messages.NewRawTransactionMessage(tx))
-	}
-
-	for _, txMessage := range txMessages {
-		if err := engineCtx.PublishMsg(engineCtx.Context(), txMessage); err != nil {
+	for _, tx := range block.Transactions() {
+		if err := engineCtx.Publish(engineCtx.Context(), &messages.RawTransactionMessage{Transaction: tx}); err != nil {
 			return fmt.Errorf("publish raw transaction message: %w", err)
 		}
 	}

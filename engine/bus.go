@@ -65,7 +65,7 @@ func CreateMessage(message TopicProvider) Message {
 type TopicID string
 
 type receiver struct {
-	impl Receiver
+	impl rawReceiver
 	ch   chan Message
 }
 
@@ -96,7 +96,7 @@ func createTopic(id TopicID, engineCtx EngineCtx, persistenceDB PersistenceDB) *
 	}
 }
 
-func (t *Topic) subscribe(actorID ActorID, rcv Receiver) {
+func (t *Topic) subscribe(actorID ActorID, rcv rawReceiver) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -168,7 +168,7 @@ func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receive
 
 	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusProcessing, handling.Retries)
 
-	if err := rcv.impl.Receive(t.engineCtx, msg); err != nil {
+	if err := rcv.impl.receive(t.engineCtx, msg); err != nil {
 		retries := handling.Retries + 1
 		if retries >= maxRetries {
 			_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusDeadLetter, retries)
@@ -218,7 +218,7 @@ type engineBus struct {
 	persistenceDB PersistenceDB
 }
 
-func (eb *engineBus) linkReceiverWithTopics(engineCtx EngineCtx, actorID ActorID, r Receiver, topics ...TopicID) {
+func (eb *engineBus) linkReceiverWithTopics(engineCtx EngineCtx, actorID ActorID, r rawReceiver, topics ...TopicID) {
 	for _, topic := range topics {
 		if _, ok := eb.topics[topic]; !ok {
 			eb.topics[topic] = createTopic(topic, engineCtx, eb.persistenceDB)

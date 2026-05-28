@@ -17,8 +17,8 @@ func (e *EngineCtx) Context() context.Context {
 	return e.ctx
 }
 
-func (e *EngineCtx) PublishMsg(ctx context.Context, msg Message) error {
-	return e.bus.publishMsg(ctx, msg)
+func (e *EngineCtx) Publish(ctx context.Context, msg TopicProvider) error {
+	return e.bus.publishMsg(ctx, CreateMessage(msg))
 }
 
 type Engine struct {
