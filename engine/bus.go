@@ -185,16 +185,7 @@ func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receive
 }
 
 func (t *Topic) getHandling(ctx context.Context, actorID ActorID, msgID MessageID) (*MessageHandling, error) {
-	handlings, err := t.persistenceDB.GetUnfinishedHandlings(ctx, actorID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range handlings {
-		if handlings[i].MessageID == msgID && handlings[i].TopicID == t.id {
-			return &handlings[i], nil
-		}
-	}
-	return nil, fmt.Errorf("handling not found for topic=%s msg=%s receiver=%s", t.id, msgID, actorID)
+	return t.persistenceDB.GetHandling(ctx, t.id, msgID, actorID)
 }
 
 func (t *Topic) receiverIDs() []ActorID {
