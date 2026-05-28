@@ -160,15 +160,15 @@ func (t *Topic) startReceiverLoop(ctx context.Context, actorID ActorID, rcv *rec
 func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receiver, msg Message) {
 	db := t.persistenceDB
 
-	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusProcessing, 0)
+	handling, err := t.getHandling(ctx, actorID, msg.ID())
+	if err != nil {
+		log.Printf("failed to get handling for %s/%s: %v", actorID, msg.ID(), err)
+		return
+	}
+
+	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusProcessing, handling.Retries)
 
 	if err := rcv.impl.Receive(t.engineCtx, msg); err != nil {
-		handling, hErr := t.getHandling(ctx, actorID, msg.ID())
-		if hErr != nil {
-			log.Printf("failed to get handling for %s/%s: %v", actorID, msg.ID(), hErr)
-			return
-		}
-
 		retries := handling.Retries + 1
 		if retries >= maxRetries {
 			_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusDeadLetter, retries)
@@ -181,7 +181,7 @@ func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receive
 		return
 	}
 
-	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusCompleted, 0)
+	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusCompleted, handling.Retries)
 }
 
 func (t *Topic) getHandling(ctx context.Context, actorID ActorID, msgID MessageID) (*MessageHandling, error) {
