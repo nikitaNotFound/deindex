@@ -1,32 +1,31 @@
-package subscribers
+package evm
 
 import (
-	"context"
 	"fmt"
 
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/nikitaNotFound/deindex/engine"
+	"github.com/nikitaNotFound/deindex/messages"
 	"github.com/nikitaNotFound/deindex/nodecon"
 	"github.com/nikitaNotFound/deindex/types"
 )
 
-type BlocksSubscriber struct {
+type BlocksSub struct {
 	network   types.Network
 	nodesPool *nodecon.NodesPool
-
-	blockHandler *blockHandler
 }
 
-func NewBlocksSubscriber(network types.Network, nodesPool *nodecon.NodesPool) *BlocksSubscriber {
-	return &BlocksSubscriber{
+func NewBlocksSub(network types.Network, nodesPool *nodecon.NodesPool) *BlocksSub {
+	return &BlocksSub{
 		network:   network,
 		nodesPool: nodesPool,
-
-		blockHandler: NewBlockHandler(network),
 	}
 }
 
-func (b *BlocksSubscriber) Start(ctx context.Context) error {
+func (b *BlocksSub) Start(engineCtx engine.EngineCtx) error {
+	ctx := engineCtx.Context()
+
 	client := ethclient.NewClient(b.nodesPool.GetActiveSubProvider())
 
 	headers := make(chan *ethtypes.Header)
@@ -43,7 +42,7 @@ func (b *BlocksSubscriber) Start(ctx context.Context) error {
 		case err := <-sub.Err():
 			return fmt.Errorf("subscription error on %s: %w", b.network, err)
 		case header := <-headers:
-			if err := b.blockHandler.handleBlock(ctx, header); err != nil {
+			if err := engineCtx.PublishMsg(ctx, messages.NewBlockMessage(header)); err != nil {
 				return fmt.Errorf("handle block: %w", err)
 			}
 		}
