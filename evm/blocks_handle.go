@@ -26,9 +26,9 @@ func NewBlocksHandle(network types.Network, nodesPool *nodecon.NodesPool) *Block
 func (b *BlocksHandle) Receive(engineCtx engine.EngineCtx, msg engine.Message) error {
 	switch msg.Topic() {
 	case messages.TopicBlock:
-		blockMsg, ok := msg.Args().(*messages.BlockMessage)
+		blockMsg, ok := msg.Payload().(*messages.BlockMessage)
 		if !ok {
-			return fmt.Errorf("invalid block message: %T", msg.Args())
+			return fmt.Errorf("invalid block message: %T", msg.Payload())
 		}
 
 		return b.handleBlock(engineCtx, blockMsg.Header)

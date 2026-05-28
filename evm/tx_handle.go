@@ -18,9 +18,9 @@ func NewTxHandler() *TxHandler {
 func (t *TxHandler) Receive(engineCtx engine.EngineCtx, msg engine.Message) error {
 	switch msg.Topic() {
 	case messages.TopicRawTransaction:
-		txMsg, ok := msg.Args().(*messages.RawTransactionMessage)
+		txMsg, ok := msg.Payload().(*messages.RawTransactionMessage)
 		if !ok {
-			return fmt.Errorf("invalid raw transaction message: %T", msg.Args())
+			return fmt.Errorf("invalid raw transaction message: %T", msg.Payload())
 		}
 		return t.handleRawTransaction(engineCtx, txMsg.Transaction)
 	}

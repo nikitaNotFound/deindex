@@ -22,7 +22,6 @@ func (e *EngineCtx) PublishMsg(ctx context.Context, msg Message) error {
 
 type Engine struct {
 	engineCtx     EngineCtx
-	executionCtx  context.Context
 	bus           *engineBus
 	persistenceDB PersistenceDB
 
@@ -43,11 +42,19 @@ func NewEngine(persistenceDB PersistenceDB) *Engine {
 }
 
 func (e *Engine) RegisterActor(actor *Actor) error {
-	if actor.HasProducer() {
+	if actor.HasProducer() || actor.HasReceiver() {
 		e.actors[actor.ID()] = actor
+		return nil
 	}
-	if actor.HasReceiver() {
-		e.actors[actor.ID()] = actor
+
+	return fmt.Errorf("actor %s has no producer or receiver", actor.ID())
+}
+
+func (e *Engine) RegisterActors(actors ...*Actor) error {
+	for _, actor := range actors {
+		if err := e.RegisterActor(actor); err != nil {
+			return fmt.Errorf("register actor %s: %w", actor.ID(), err)
+		}
 	}
 
 	return nil
@@ -127,11 +134,7 @@ func (e *Engine) recoverUnfinishedHandlings(ctx context.Context) error {
 				continue
 			}
 
-			select {
-			case rcv.ch <- msg:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+			rcv.send(ctx, msg)
 		}
 	}
 

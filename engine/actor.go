@@ -78,9 +78,10 @@ func CreateActor(impl ProducerReceiver, opts ...CreateReceiverActorOpt) *Actor {
 	params := handleCreateReceiverParams(opts...)
 
 	return &Actor{
-		id:       params.customID,
-		producer: impl,
-		receiver: impl,
+		id:             params.customID,
+		producer:       impl,
+		receiver:       impl,
+		listenedTopics: params.listenedTopics,
 	}
 }
 
@@ -98,9 +99,10 @@ func CreateReceiverActor(impl Receiver, opts ...CreateReceiverActorOpt) *Actor {
 	params := handleCreateReceiverParams(opts...)
 
 	return &Actor{
-		id:       params.customID,
-		producer: nil,
-		receiver: impl,
+		id:             params.customID,
+		producer:       nil,
+		receiver:       impl,
+		listenedTopics: params.listenedTopics,
 	}
 }
 

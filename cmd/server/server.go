@@ -10,7 +10,6 @@ import (
 
 	"github.com/nikitaNotFound/deindex/engine"
 	"github.com/nikitaNotFound/deindex/evm"
-	"github.com/nikitaNotFound/deindex/messages"
 	"github.com/nikitaNotFound/deindex/nodecon"
 	"github.com/spf13/cobra"
 )
@@ -59,12 +58,15 @@ func runServer(cfg *ServerCfg) error {
 		return fmt.Errorf("create nodes pool: %w", err)
 	}
 
-	engine := engine.NewEngine()
+	// TODO: replace with actual persistence DB implementation
+	e := engine.NewEngine(nil)
 
 	blocksSub := evm.NewBlocksSub(cfg.Network, nodesPool)
-	engine.RegisterProducer(blocksSub, messages.TopicBlock)
+	blockSubActor := engine.CreateProducerActor(blocksSub)
 
-	if err := engine.Start(ctx); err != nil {
+	e.RegisterActors(blockSubActor)
+
+	if err := e.Start(ctx); err != nil {
 		return fmt.Errorf("start engine: %w", err)
 	}
 

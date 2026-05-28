@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type MessageHandlingStatus int
@@ -20,17 +22,44 @@ const (
 type MessageHandling struct {
 	ID         string
 	TopicID    TopicID
-	MessageID  string
+	MessageID  MessageID
 	ReceiverID ActorID
 	Status     MessageHandlingStatus
 	Retries    int
 	CreatedAt  time.Time
 }
 
-type Message interface {
+type MessageID uuid.UUID
+
+type Message struct {
+	payload any
+	id      MessageID
+	topic   TopicID
+}
+
+func (m *Message) ID() MessageID {
+	return m.id
+}
+
+func (m *Message) Topic() TopicID {
+	return m.topic
+}
+
+func (m *Message) Payload() any {
+	return m.payload
+}
+
+type TopicProvider interface {
 	Topic() TopicID
-	Args() any
-	ID() string
+}
+
+func CreateMessage(message TopicProvider) Message {
+	id := uuid.New()
+	return Message{
+		payload: message,
+		id:      MessageID(id),
+		topic:   message.Topic(),
+	}
 }
 
 type TopicID string
@@ -38,6 +67,13 @@ type TopicID string
 type receiver struct {
 	impl Receiver
 	ch   chan Message
+}
+
+func (r *receiver) send(ctx context.Context, msg Message) {
+	select {
+	case r.ch <- msg:
+	case <-ctx.Done():
+	}
 }
 
 type Topic struct {
@@ -104,11 +140,7 @@ func (t *Topic) broadcast(ctx context.Context, msg Message) {
 	defer t.mu.RUnlock()
 
 	for _, rcv := range t.receivers {
-		select {
-		case rcv.ch <- msg:
-		case <-ctx.Done():
-			return
-		}
+		rcv.send(ctx, msg)
 	}
 }
 
@@ -145,17 +177,14 @@ func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receive
 		}
 
 		_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusProcessing, retries)
-		select {
-		case rcv.ch <- msg:
-		case <-ctx.Done():
-		}
+		rcv.send(ctx, msg)
 		return
 	}
 
 	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusCompleted, 0)
 }
 
-func (t *Topic) getHandling(ctx context.Context, actorID ActorID, msgID string) (*MessageHandling, error) {
+func (t *Topic) getHandling(ctx context.Context, actorID ActorID, msgID MessageID) (*MessageHandling, error) {
 	handlings, err := t.persistenceDB.GetUnfinishedHandlings(ctx, actorID)
 	if err != nil {
 		return nil, err
@@ -218,7 +247,12 @@ func (eb *engineBus) publishMsg(ctx context.Context, msg Message) error {
 }
 
 func (eb *engineBus) start(ctx context.Context) {
+	wg := sync.WaitGroup{}
 	for _, topic := range eb.topics {
-		go topic.startBusLoop(ctx)
+		wg.Go(func() {
+			topic.startBusLoop(ctx)
+		})
 	}
+
+	wg.Wait()
 }
