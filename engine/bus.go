@@ -77,6 +77,7 @@ func (r *receiver) send(ctx context.Context, msg Message) {
 }
 
 type Topic struct {
+	cfg           EngineConfig
 	id            TopicID
 	msgChan       chan Message
 	receivers     map[ActorID]*receiver
@@ -86,10 +87,11 @@ type Topic struct {
 	mu sync.RWMutex
 }
 
-func createTopic(id TopicID, engineCtx EngineCtx, persistenceDB PersistenceDB) *Topic {
+func createTopic(id TopicID, cfg EngineConfig, engineCtx EngineCtx, persistenceDB PersistenceDB) *Topic {
 	return &Topic{
+		cfg:           cfg,
 		id:            id,
-		msgChan:       make(chan Message, 64),
+		msgChan:       make(chan Message, cfg.TopicBufferSize),
 		receivers:     make(map[ActorID]*receiver),
 		engineCtx:     engineCtx,
 		persistenceDB: persistenceDB,
@@ -102,7 +104,7 @@ func (t *Topic) subscribe(actorID ActorID, rcv rawReceiver) {
 
 	t.receivers[actorID] = &receiver{
 		impl: rcv,
-		ch:   make(chan Message, 64),
+		ch:   make(chan Message, t.cfg.ReceiverBufferSize),
 	}
 }
 
@@ -144,8 +146,6 @@ func (t *Topic) broadcast(ctx context.Context, msg Message) {
 	}
 }
 
-const maxRetries = 5
-
 func (t *Topic) startReceiverLoop(ctx context.Context, actorID ActorID, rcv *receiver) {
 	for {
 		select {
@@ -170,7 +170,7 @@ func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receive
 
 	if err := rcv.impl.receive(t.engineCtx, msg); err != nil {
 		retries := handling.Retries + 1
-		if retries >= maxRetries {
+		if retries >= t.cfg.MaxRetries {
 			_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusDeadLetter, retries)
 			log.Printf("dead-lettered message %s for receiver %s after %d retries", msg.ID(), actorID, retries)
 			return
@@ -214,6 +214,7 @@ func (t *Topic) publish(ctx context.Context, msg Message) error {
 }
 
 type engineBus struct {
+	cfg           EngineConfig
 	topics        map[TopicID]*Topic
 	persistenceDB PersistenceDB
 }
@@ -221,7 +222,7 @@ type engineBus struct {
 func (eb *engineBus) linkReceiverWithTopics(engineCtx EngineCtx, actorID ActorID, r rawReceiver, topics ...TopicID) {
 	for _, topic := range topics {
 		if _, ok := eb.topics[topic]; !ok {
-			eb.topics[topic] = createTopic(topic, engineCtx, eb.persistenceDB)
+			eb.topics[topic] = createTopic(topic, eb.cfg, engineCtx, eb.persistenceDB)
 		}
 
 		eb.topics[topic].subscribe(actorID, r)

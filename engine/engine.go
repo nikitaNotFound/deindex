@@ -21,7 +21,42 @@ func (e *EngineCtx) Publish(ctx context.Context, msg TopicProvider) error {
 	return e.bus.publishMsg(ctx, CreateMessage(msg))
 }
 
+type EngineConfig struct {
+	TopicBufferSize    int
+	ReceiverBufferSize int
+	MaxRetries         int
+	CleanupInterval    time.Duration
+}
+
+type EngineOpt func(*EngineConfig)
+
+func WithTopicBufferSize(size int) EngineOpt {
+	return func(cfg *EngineConfig) { cfg.TopicBufferSize = size }
+}
+
+func WithReceiverBufferSize(size int) EngineOpt {
+	return func(cfg *EngineConfig) { cfg.ReceiverBufferSize = size }
+}
+
+func WithMaxRetries(n int) EngineOpt {
+	return func(cfg *EngineConfig) { cfg.MaxRetries = n }
+}
+
+func WithCleanupInterval(d time.Duration) EngineOpt {
+	return func(cfg *EngineConfig) { cfg.CleanupInterval = d }
+}
+
+func defaultConfig() EngineConfig {
+	return EngineConfig{
+		TopicBufferSize:    512,
+		ReceiverBufferSize: 512,
+		MaxRetries:         5,
+		CleanupInterval:    10 * time.Minute,
+	}
+}
+
 type Engine struct {
+	cfg           EngineConfig
 	engineCtx     EngineCtx
 	bus           *engineBus
 	persistenceDB PersistenceDB
@@ -29,13 +64,20 @@ type Engine struct {
 	actors map[ActorID]*Actor
 }
 
-func NewEngine(persistenceDB PersistenceDB) *Engine {
+func NewEngine(persistenceDB PersistenceDB, opts ...EngineOpt) *Engine {
+	cfg := defaultConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	bus := &engineBus{
+		cfg:           cfg,
 		topics:        make(map[TopicID]*Topic),
 		persistenceDB: persistenceDB,
 	}
 
 	return &Engine{
+		cfg:           cfg,
 		persistenceDB: persistenceDB,
 		actors:        make(map[ActorID]*Actor),
 		bus:           bus,
@@ -145,10 +187,8 @@ func (e *Engine) recoverUnfinishedHandlings(ctx context.Context) error {
 	return nil
 }
 
-const cleanupInterval = 10 * time.Minute
-
 func (e *Engine) runCleanupLoop(ctx context.Context) {
-	ticker := time.NewTicker(cleanupInterval)
+	ticker := time.NewTicker(e.cfg.CleanupInterval)
 	defer ticker.Stop()
 
 	for {
