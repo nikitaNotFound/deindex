@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 type EngineCtx struct {
@@ -90,6 +91,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	wg.Go(func() {
 		e.bus.start(ctx)
 	})
+	wg.Go(func() {
+		e.runCleanupLoop(ctx)
+	})
 
 	wg.Wait()
 
@@ -139,4 +143,22 @@ func (e *Engine) recoverUnfinishedHandlings(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+const cleanupInterval = 10 * time.Minute
+
+func (e *Engine) runCleanupLoop(ctx context.Context) {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := e.persistenceDB.DeleteExpiredMessages(ctx); err != nil {
+				log.Printf("failed to delete expired messages: %v", err)
+			}
+		}
+	}
 }
