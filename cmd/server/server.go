@@ -62,7 +62,7 @@ func runServer(cfg *ServerCfg) error {
 	e := engine.NewEngine(nil)
 
 	blocksSub := evm.NewBlocksSub(cfg.Network, nodesPool)
-	blockSubActor := engine.CreateProducerActor(blocksSub)
+	blockSubActor := engine.CreateProducerActor("evm.blocks-sub", blocksSub)
 
 	e.RegisterActors(blockSubActor)
 

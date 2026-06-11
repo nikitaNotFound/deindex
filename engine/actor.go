@@ -2,8 +2,6 @@ package engine
 
 import (
 	"fmt"
-
-	"github.com/google/uuid"
 )
 
 type ActorID string
@@ -64,22 +62,10 @@ func (a *Actor) GetListenedTopics() []TopicID {
 	return a.listenedTopics
 }
 
-type CreateActorParams struct {
-	customID ActorID
-}
-type CreateActorOpt func(*CreateActorParams)
-
 type CreateReceiverActorParams struct {
-	customID       ActorID
 	listenedTopics []TopicID
 }
 type CreateReceiverActorOpt func(*CreateReceiverActorParams)
-
-func WithCustomID(id ActorID) CreateActorOpt {
-	return func(params *CreateActorParams) {
-		params.customID = id
-	}
-}
 
 func WithListenedTopics(topics ...TopicID) CreateReceiverActorOpt {
 	return func(params *CreateReceiverActorParams) {
@@ -92,54 +78,38 @@ type ProducerReceiver[T TopicProvider] interface {
 	Receiver[T]
 }
 
-func CreateProducerReceiverActor[T TopicProvider](impl ProducerReceiver[T], opts ...CreateReceiverActorOpt) *Actor {
+func CreateProducerReceiverActor[T TopicProvider](id ActorID, impl ProducerReceiver[T], opts ...CreateReceiverActorOpt) *Actor {
 	params := handleCreateReceiverParams(opts...)
 
 	return &Actor{
-		id:             params.customID,
+		id:             id,
 		producer:       impl,
 		receiver:       &typedReceiver[T]{impl: impl},
 		listenedTopics: params.listenedTopics,
 	}
 }
 
-func CreateProducerActor(impl Producer, opts ...CreateActorOpt) *Actor {
-	params := handleCreateParams(opts...)
-
+func CreateProducerActor(id ActorID, impl Producer) *Actor {
 	return &Actor{
-		id:       params.customID,
+		id:       id,
 		producer: impl,
 		receiver: nil,
 	}
 }
 
-func CreateReceiverActor[T TopicProvider](impl Receiver[T], opts ...CreateReceiverActorOpt) *Actor {
+func CreateReceiverActor[T TopicProvider](id ActorID, impl Receiver[T], opts ...CreateReceiverActorOpt) *Actor {
 	params := handleCreateReceiverParams(opts...)
 
 	return &Actor{
-		id:             params.customID,
+		id:             id,
 		producer:       nil,
 		receiver:       &typedReceiver[T]{impl: impl},
 		listenedTopics: params.listenedTopics,
 	}
 }
 
-func handleCreateParams(opts ...CreateActorOpt) *CreateActorParams {
-	id := ActorID(uuid.New().String())
-	params := &CreateActorParams{
-		customID: id,
-	}
-	for _, opt := range opts {
-		opt(params)
-	}
-
-	return params
-}
-
 func handleCreateReceiverParams(opts ...CreateReceiverActorOpt) *CreateReceiverActorParams {
-	id := ActorID(uuid.New().String())
 	params := &CreateReceiverActorParams{
-		customID:       id,
 		listenedTopics: []TopicID{},
 	}
 	for _, opt := range opts {
