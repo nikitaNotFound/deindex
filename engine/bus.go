@@ -219,14 +219,12 @@ type engineBus struct {
 	persistenceDB PersistenceDB
 }
 
-func (eb *engineBus) linkReceiverWithTopics(engineCtx EngineCtx, actorID ActorID, r rawReceiver, topics ...TopicID) {
-	for _, topic := range topics {
-		if _, ok := eb.topics[topic]; !ok {
-			eb.topics[topic] = createTopic(topic, eb.cfg, engineCtx, eb.persistenceDB)
-		}
-
-		eb.topics[topic].subscribe(actorID, r)
+func (eb *engineBus) linkReceiverWithTopic(engineCtx EngineCtx, actorID ActorID, r rawReceiver, topic TopicID) {
+	if _, ok := eb.topics[topic]; !ok {
+		eb.topics[topic] = createTopic(topic, eb.cfg, engineCtx, eb.persistenceDB)
 	}
+
+	eb.topics[topic].subscribe(actorID, r)
 }
 
 func (eb *engineBus) publishMsg(ctx context.Context, msg Message) error {

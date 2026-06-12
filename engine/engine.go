@@ -112,7 +112,7 @@ func (e *Engine) Start(ctx context.Context) error {
 
 	for _, actor := range e.actors {
 		if actor.HasReceiver() {
-			e.bus.linkReceiverWithTopics(e.engineCtx, actor.ID(), actor.GetReceiver(), actor.GetListenedTopics()...)
+			e.bus.linkReceiverWithTopic(e.engineCtx, actor.ID(), actor.GetReceiver(), actor.ListenedTopic())
 		}
 	}
 

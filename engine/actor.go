@@ -35,7 +35,7 @@ type Actor struct {
 	producer Producer
 	receiver rawReceiver
 
-	listenedTopics []TopicID
+	listenedTopic TopicID
 }
 
 func (a *Actor) ID() ActorID {
@@ -58,19 +58,8 @@ func (a *Actor) HasReceiver() bool {
 	return a.receiver != nil
 }
 
-func (a *Actor) GetListenedTopics() []TopicID {
-	return a.listenedTopics
-}
-
-type CreateReceiverActorParams struct {
-	listenedTopics []TopicID
-}
-type CreateReceiverActorOpt func(*CreateReceiverActorParams)
-
-func WithListenedTopics(topics ...TopicID) CreateReceiverActorOpt {
-	return func(params *CreateReceiverActorParams) {
-		params.listenedTopics = topics
-	}
+func (a *Actor) ListenedTopic() TopicID {
+	return a.listenedTopic
 }
 
 type ProducerReceiver[T TopicProvider] interface {
@@ -78,14 +67,21 @@ type ProducerReceiver[T TopicProvider] interface {
 	Receiver[T]
 }
 
-func CreateProducerReceiverActor[T TopicProvider](id ActorID, impl ProducerReceiver[T], opts ...CreateReceiverActorOpt) *Actor {
-	params := handleCreateReceiverParams(opts...)
+// topicOf derives the topic a Receiver[T] listens to from T itself, so the
+// subscription can never disagree with the message type. This relies on the
+// TopicProvider contract: Topic() must return a constant and be safe to call on
+// the zero value of T (typically a nil pointer).
+func topicOf[T TopicProvider]() TopicID {
+	var zero T
+	return zero.Topic()
+}
 
+func CreateProducerReceiverActor[T TopicProvider](id ActorID, impl ProducerReceiver[T]) *Actor {
 	return &Actor{
-		id:             id,
-		producer:       impl,
-		receiver:       &typedReceiver[T]{impl: impl},
-		listenedTopics: params.listenedTopics,
+		id:            id,
+		producer:      impl,
+		receiver:      &typedReceiver[T]{impl: impl},
+		listenedTopic: topicOf[T](),
 	}
 }
 
@@ -97,24 +93,11 @@ func CreateProducerActor(id ActorID, impl Producer) *Actor {
 	}
 }
 
-func CreateReceiverActor[T TopicProvider](id ActorID, impl Receiver[T], opts ...CreateReceiverActorOpt) *Actor {
-	params := handleCreateReceiverParams(opts...)
-
+func CreateReceiverActor[T TopicProvider](id ActorID, impl Receiver[T]) *Actor {
 	return &Actor{
-		id:             id,
-		producer:       nil,
-		receiver:       &typedReceiver[T]{impl: impl},
-		listenedTopics: params.listenedTopics,
+		id:            id,
+		producer:      nil,
+		receiver:      &typedReceiver[T]{impl: impl},
+		listenedTopic: topicOf[T](),
 	}
-}
-
-func handleCreateReceiverParams(opts ...CreateReceiverActorOpt) *CreateReceiverActorParams {
-	params := &CreateReceiverActorParams{
-		listenedTopics: []TopicID{},
-	}
-	for _, opt := range opts {
-		opt(params)
-	}
-
-	return params
 }
