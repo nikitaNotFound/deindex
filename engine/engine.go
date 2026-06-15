@@ -56,31 +56,31 @@ func defaultConfig() EngineConfig {
 }
 
 type Engine struct {
-	cfg           EngineConfig
-	engineCtx     EngineCtx
-	bus           *engineBus
-	persistenceDB PersistenceDB
+	cfg       EngineConfig
+	engineCtx EngineCtx
+	bus       *engineBus
+	db        EngineDB
 
 	actors map[ActorID]*Actor
 }
 
-func NewEngine(persistenceDB PersistenceDB, opts ...EngineOpt) *Engine {
+func NewEngine(persistenceDB EngineDB, opts ...EngineOpt) *Engine {
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	bus := &engineBus{
-		cfg:           cfg,
-		topics:        make(map[TopicID]*Topic),
-		persistenceDB: persistenceDB,
+		cfg:    cfg,
+		topics: make(map[TopicID]*Topic),
+		db:     persistenceDB,
 	}
 
 	return &Engine{
-		cfg:           cfg,
-		persistenceDB: persistenceDB,
-		actors:        make(map[ActorID]*Actor),
-		bus:           bus,
+		cfg:    cfg,
+		db:     persistenceDB,
+		actors: make(map[ActorID]*Actor),
+		bus:    bus,
 	}
 }
 
@@ -148,7 +148,7 @@ func (e *Engine) recoverUnfinishedHandlings(ctx context.Context) error {
 			continue
 		}
 
-		handlings, err := e.persistenceDB.GetUnfinishedHandlings(ctx, actor.ID())
+		handlings, err := e.db.GetUnfinishedHandlings(ctx, actor.ID())
 		if err != nil {
 			return fmt.Errorf("get unfinished handlings for %s: %w", actor.ID(), err)
 		}
@@ -166,7 +166,7 @@ func (e *Engine) recoverUnfinishedHandlings(ctx context.Context) error {
 				continue
 			}
 
-			msg, err := e.persistenceDB.GetMessage(ctx, h.TopicID, h.MessageID)
+			msg, err := e.db.GetMessage(ctx, h.TopicID, h.MessageID)
 			if err != nil {
 				log.Printf("skipping handling %s: failed to get message %s: %v", h.ID, h.MessageID, err)
 				continue
@@ -196,7 +196,7 @@ func (e *Engine) runCleanupLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := e.persistenceDB.DeleteExpiredMessages(ctx); err != nil {
+			if err := e.db.DeleteExpiredMessages(ctx); err != nil {
 				log.Printf("failed to delete expired messages: %v", err)
 			}
 		}

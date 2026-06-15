@@ -32,9 +32,10 @@ type MessageHandling struct {
 type MessageID uuid.UUID
 
 type Message struct {
-	payload any
-	id      MessageID
-	topic   TopicID
+	payload         any
+	id              MessageID
+	topic           TopicID
+	retryIntervalFn func(retries int) time.Duration
 }
 
 func (m *Message) ID() MessageID {
@@ -49,17 +50,34 @@ func (m *Message) Payload() any {
 	return m.payload
 }
 
+func (m *Message) GetRetryInterval(retries int) time.Duration {
+	if m.retryIntervalFn == nil {
+		return time.Duration(retries) * time.Second * 30
+	}
+
+	return m.retryIntervalFn(retries)
+}
+
 type TopicProvider interface {
 	Topic() TopicID
 }
 
+type RetryIntervalProvider interface {
+	RetryInterval(retries int) time.Duration
+}
+
 func CreateMessage(message TopicProvider) Message {
-	id := uuid.New()
-	return Message{
-		payload: message,
-		id:      MessageID(id),
-		topic:   message.Topic(),
+	msg := Message{}
+	if retryIntervalProvider, ok := message.(RetryIntervalProvider); ok {
+		msg.retryIntervalFn = retryIntervalProvider.RetryInterval
 	}
+
+	id := uuid.New()
+	msg.id = MessageID(id)
+	msg.topic = message.Topic()
+	msg.payload = message
+
+	return msg
 }
 
 type TopicID string
@@ -77,24 +95,22 @@ func (r *receiver) send(ctx context.Context, msg Message) {
 }
 
 type Topic struct {
-	cfg           EngineConfig
-	id            TopicID
-	msgChan       chan Message
-	receivers     map[ActorID]*receiver
-	engineCtx     EngineCtx
-	persistenceDB PersistenceDB
+	cfg       EngineConfig
+	id        TopicID
+	receivers map[ActorID]*receiver
+	engineCtx EngineCtx
+	db        EngineDB
 
 	mu sync.RWMutex
 }
 
-func createTopic(id TopicID, cfg EngineConfig, engineCtx EngineCtx, persistenceDB PersistenceDB) *Topic {
+func createTopic(id TopicID, cfg EngineConfig, engineCtx EngineCtx, db EngineDB) *Topic {
 	return &Topic{
-		cfg:           cfg,
-		id:            id,
-		msgChan:       make(chan Message, cfg.TopicBufferSize),
-		receivers:     make(map[ActorID]*receiver),
-		engineCtx:     engineCtx,
-		persistenceDB: persistenceDB,
+		cfg:       cfg,
+		id:        id,
+		receivers: make(map[ActorID]*receiver),
+		engineCtx: engineCtx,
+		db:        db,
 	}
 }
 
@@ -111,10 +127,6 @@ func (t *Topic) subscribe(actorID ActorID, rcv rawReceiver) {
 func (t *Topic) startBusLoop(ctx context.Context) {
 	wg := sync.WaitGroup{}
 
-	wg.Go(func() {
-		t.startBroadcastLoop(ctx)
-	})
-
 	t.mu.RLock()
 	for actorID, rcv := range t.receivers {
 		wg.Go(func() {
@@ -124,17 +136,6 @@ func (t *Topic) startBusLoop(ctx context.Context) {
 	t.mu.RUnlock()
 
 	wg.Wait()
-}
-
-func (t *Topic) startBroadcastLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-t.msgChan:
-			t.broadcast(ctx, msg)
-		}
-	}
 }
 
 func (t *Topic) broadcast(ctx context.Context, msg Message) {
@@ -152,40 +153,62 @@ func (t *Topic) startReceiverLoop(ctx context.Context, actorID ActorID, rcv *rec
 		case <-ctx.Done():
 			return
 		case msg := <-rcv.ch:
-			t.handleMessage(ctx, actorID, rcv, msg)
+			if err := t.handleMessage(ctx, actorID, rcv, msg); err != nil {
+				log.Printf("failed to handle message %s for receiver %s: %v", msg.ID(), actorID, err)
+			}
 		}
 	}
 }
 
-func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receiver, msg Message) {
-	db := t.persistenceDB
-
+func (t *Topic) handleMessage(ctx context.Context, actorID ActorID, rcv *receiver, msg Message) error {
 	handling, err := t.getHandling(ctx, actorID, msg.ID())
 	if err != nil {
 		log.Printf("failed to get handling for %s/%s: %v", actorID, msg.ID(), err)
-		return
+		return err
 	}
 
-	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusProcessing, handling.Retries)
+	if handling == nil {
+		return fmt.Errorf("handling not found for %s/%s", actorID, msg.ID())
+	}
 
 	if err := rcv.impl.receive(t.engineCtx, msg); err != nil {
 		retries := handling.Retries + 1
 		if retries >= t.cfg.MaxRetries {
-			_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusDeadLetter, retries)
-			log.Printf("dead-lettered message %s for receiver %s after %d retries", msg.ID(), actorID, retries)
-			return
+			return t.db.UpdateHandlingStatus(ctx, UpdateHandlingParams{
+				TopicID:    t.id,
+				MessageID:  msg.ID(),
+				ReceiverID: actorID,
+				Status:     MessageHandlingStatusDeadLetter,
+				Retries:    retries,
+			})
 		}
 
-		_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusProcessing, retries)
-		rcv.send(ctx, msg)
-		return
+		executeAt := time.Now().Add(msg.GetRetryInterval(retries))
+		if err := t.db.UpdateHandlingStatus(ctx, UpdateHandlingParams{
+			TopicID:    t.id,
+			MessageID:  msg.ID(),
+			ReceiverID: actorID,
+			Status:     MessageHandlingStatusProcessing,
+			Retries:    retries,
+			ExecuteAt:  &executeAt,
+		}); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	_ = db.UpdateHandlingStatus(ctx, t.id, msg.ID(), actorID, MessageHandlingStatusCompleted, handling.Retries)
+	return t.db.UpdateHandlingStatus(ctx, UpdateHandlingParams{
+		TopicID:    t.id,
+		MessageID:  msg.ID(),
+		ReceiverID: actorID,
+		Status:     MessageHandlingStatusCompleted,
+		Retries:    handling.Retries,
+	})
 }
 
 func (t *Topic) getHandling(ctx context.Context, actorID ActorID, msgID MessageID) (*MessageHandling, error) {
-	return t.persistenceDB.GetHandling(ctx, t.id, msgID, actorID)
+	return t.db.GetHandling(ctx, t.id, msgID, actorID)
 }
 
 func (t *Topic) receiverIDs() []ActorID {
@@ -199,41 +222,46 @@ func (t *Topic) receiverIDs() []ActorID {
 	return ids
 }
 
-func (t *Topic) publish(ctx context.Context, msg Message) error {
-	if err := t.persistenceDB.PublishMessage(ctx, t.id, msg, t.receiverIDs()); err != nil {
-		return fmt.Errorf("persist message: %w", err)
-	}
-
-	select {
-	case t.msgChan <- msg:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	return nil
-}
-
 type engineBus struct {
-	cfg           EngineConfig
-	topics        map[TopicID]*Topic
-	persistenceDB PersistenceDB
+	cfg    EngineConfig
+	topics map[TopicID]*Topic
+	db     EngineDB
 }
 
 func (eb *engineBus) linkReceiverWithTopic(engineCtx EngineCtx, actorID ActorID, r rawReceiver, topic TopicID) {
 	if _, ok := eb.topics[topic]; !ok {
-		eb.topics[topic] = createTopic(topic, eb.cfg, engineCtx, eb.persistenceDB)
+		eb.topics[topic] = createTopic(topic, eb.cfg, engineCtx, eb.db)
 	}
 
 	eb.topics[topic].subscribe(actorID, r)
 }
 
 func (eb *engineBus) publishMsg(ctx context.Context, msg Message) error {
-	topic := msg.Topic()
-	if _, ok := eb.topics[topic]; !ok {
-		return fmt.Errorf("topic not found: %s", topic)
+	topicID := msg.Topic()
+	topic, ok := eb.topics[topicID]
+	if !ok {
+		return fmt.Errorf("topic %s not found", topicID)
 	}
 
-	return eb.topics[topic].publish(ctx, msg)
+	if err := eb.db.WrapTx(ctx, func(ctx context.Context) error {
+		if err := eb.db.CreateMessage(ctx, topic.id, msg, topic.receiverIDs()); err != nil {
+			return err
+		}
+
+		for _, rcvID := range topic.receiverIDs() {
+			if err := eb.db.CreateHandling(ctx, topic.id, msg.ID(), rcvID); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("publish message to topic %s: %w", topic.id, err)
+	}
+
+	topic.broadcast(ctx, msg)
+
+	return nil
 }
 
 func (eb *engineBus) start(ctx context.Context) {
